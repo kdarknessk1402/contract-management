@@ -1,0 +1,42 @@
+# Dependencies
+/vendor/
+/node_modules/
+
+# Composer
+composer.phar
+composer.lock
+
+# Environment
+.env
+.env.backup
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Upload files
+/uploads/lecturers/*
+!/uploads/lecturers/.gitkeep
+
+# Export files
+/exports/*
+!/exports/.gitkeep
+
+# Backup files
+/backups/*
+!/backups/.gitkeep
+
+# Log files
+*.log
+/logs/
+
+# Cache
+/cache/
+/tmp/
