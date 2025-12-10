@@ -179,7 +179,7 @@ include 'includes/header.php';
                         <label for="subject_id" class="form-label">
                             Môn học/Mô đun <span class="text-danger">*</span>
                         </label>
-                        <select class="form-select" id="subject_id" name="subject_id" required disabled>
+                        <select class="form-select" id="subject_id" name="subject_id" required>
                             <option value="">-- Chọn nghề và trình độ trước --</option>
                         </select>
                         <small class="text-muted">Số giờ sẽ tự động load từ môn học</small>
@@ -342,41 +342,29 @@ console.log('🚀 Script loaded');
 $(document).ready(function() {
     console.log('✅ Document ready');
     
-    // Debug: Kiểm tra các element tồn tại
-    console.log('Elements check:', {
-        profession_code: $('#profession_code').length,
-        level: $('#level').length,
-        subject_id: $('#subject_id').length,
-        location_id: $('#location_id').length
-    });
-    
     // ⭐ Khi chọn nghề HOẶC trình độ → Load môn học
     $('#profession_code, #level').on('change', function() {
-        console.log('🔄 Change event triggered:', {
-            element: this.id,
-            profession_code: $('#profession_code').val(),
-            level: $('#level').val()
-        });
+        console.log('🔄 Profession or Level changed');
         loadSubjects();
-        loadClasses(); // Load lớp nếu đã chọn đủ
+        loadClasses();
     });
     
     // ⭐ Khi chọn cơ sở → Load lớp và giá giờ
     $('#location_id').on('change', function() {
-        console.log('🔄 Location changed:', $('#location_id').val());
+        console.log('🔄 Location changed');
         loadClasses();
         loadHourlyRate();
     });
     
     // Khi chọn giảng viên → Load giá giờ
     $('#lecturer_id').on('change', function() {
-        console.log('🔄 Lecturer changed:', $('#lecturer_id').val());
+        console.log('🔄 Lecturer changed');
         loadHourlyRate();
     });
     
     // Khi chọn môn học → Load số giờ
     $('#subject_id').on('change', function() {
-        console.log('🔄 Subject changed:', $('#subject_id').val());
+        console.log('🔄 Subject changed');
         loadSubjectHours();
     });
     
@@ -384,14 +372,14 @@ $(document).ready(function() {
     $('#total_hours, #hourly_rate').on('input change', function() {
         calculateTotal();
     });
-    
-    console.log('✅ All event listeners attached');
 });
 
 // ⭐ Load môn học theo profession_code + level + faculty_id
 function loadSubjects() {
     const professionCode = $('#profession_code').val();
     const level = $('#level').val();
+    
+    console.log('📚 loadSubjects called:', {professionCode, level});
     
     if (!professionCode || !level) {
         $('#subject_id').prop('disabled', true)
@@ -400,14 +388,10 @@ function loadSubjects() {
         return;
     }
     
-    console.log('📚 Loading subjects:', {
-        profession_code: professionCode,
-        level: level,
-        faculty_id: <?php echo $_SESSION['faculty_id']; ?>
-    });
-    
-    // Hiển thị loading
-    $('#subject_id').empty().append('<option value="">⏳ Đang tải...</option>');
+    // ⭐ XÓA DISABLED NGAY
+    $('#subject_id').prop('disabled', false)
+                    .empty()
+                    .append('<option value="">⏳ Đang tải...</option>');
     
     $.ajax({
         url: 'ajax/get_subjects_by_profession_level.php',
@@ -418,17 +402,18 @@ function loadSubjects() {
             faculty_id: <?php echo $_SESSION['faculty_id']; ?>
         },
         dataType: 'json',
-        timeout: 10000, // 10 giây
+        timeout: 10000,
         success: function(response) {
             console.log('✅ Subjects response:', response);
             
+            const subjectSelect = $('#subject_id');
+            
             if (response && response.success) {
-                // ⭐ Lưu profession_id vào hidden field
+                // ⭐ Lưu profession_id
                 $('#profession_id').val(response.profession_id);
                 
-                // Load subjects
-                const subjectSelect = $('#subject_id');
-                subjectSelect.prop('disabled', false) // ✅ XÓA DISABLED
+                // ⭐ LUÔN ENABLE (quan trọng!)
+                subjectSelect.prop('disabled', false)
                            .empty()
                            .append('<option value="">-- Chọn môn học --</option>');
                 
@@ -441,57 +426,34 @@ function loadSubjects() {
                         );
                     });
                 } else {
-                    subjectSelect.prop('disabled', false) // ✅ VẪN CHO CHỌN
-                             .append('<option value="">-- Không có môn học --</option>');
-                    alert('⚠️ Không tìm thấy môn học!\n\nNghề: ' + professionCode + '\nTrình độ: ' + level + 
-                          '\n\n💡 Vui lòng thêm môn học trong "Quản lý môn học"');
+                    subjectSelect.append('<option value="">-- Không có môn học --</option>');
+                    alert('⚠️ Không tìm thấy môn học!\n\nNghề: ' + professionCode + '\nTrình độ: ' + level);
                 }
             } else {
-                console.error('❌ Invalid response:', response);
-                alert('❌ Lỗi: ' + (response?.message || 'Response không hợp lệ'));
-                $('#subject_id').prop('disabled', true)
-                               .empty()
-                               .append('<option value="">-- Lỗi --</option>');
+                console.error('❌ Response failed:', response);
+                
+                // ⭐ VẪN CHO CHỌN dù có lỗi
+                subjectSelect.prop('disabled', false)
+                           .empty()
+                           .append('<option value="">-- Lỗi: ' + (response?.message || 'Không rõ') + ' --</option>');
+                
+                alert('❌ ' + (response?.message || 'Lỗi không xác định'));
             }
         },
         error: function(xhr, status, error) {
-            console.error('❌ AJAX Error:', {
-                status: status,
-                error: error,
-                statusText: xhr.statusText,
-                responseText: xhr.responseText,
-                readyState: xhr.readyState
-            });
+            console.error('❌ AJAX Error:', {status, error, response: xhr.responseText});
             
-            let errorMsg = 'Lỗi khi tải môn học!\n\n';
+            // ⭐ ENABLE để user biết có lỗi
+            $('#subject_id').prop('disabled', false)
+                          .empty()
+                          .append('<option value="">-- Lỗi kết nối --</option>');
             
-            if (xhr.status === 404) {
-                errorMsg += '❌ File không tồn tại: ajax/get_subjects_by_profession_level.php';
-            } else if (xhr.status === 500) {
-                errorMsg += '❌ Lỗi server (500). Kiểm tra:\n';
-                errorMsg += '1. File PHP có lỗi syntax\n';
-                errorMsg += '2. Database connection\n';
-                errorMsg += '3. Console (F12) để xem chi tiết';
-            } else if (status === 'timeout') {
-                errorMsg += '❌ Timeout (quá 10s). Kiểm tra:\n';
-                errorMsg += '1. Database quá chậm\n';
-                errorMsg += '2. Query phức tạp';
-            } else {
-                errorMsg += 'Status: ' + status + '\n';
-                errorMsg += 'Error: ' + error + '\n';
-                errorMsg += '\n💡 Mở Console (F12) > Network tab để xem chi tiết';
-            }
-            
-            alert(errorMsg);
-            
-            $('#subject_id').prop('disabled', true)
-                           .empty()
-                           .append('<option value="">-- Lỗi --</option>');
+            alert('❌ Lỗi khi tải môn học!\n\nKiểm tra Console (F12) để xem chi tiết.');
         }
     });
 }
 
-// ⭐ Load lớp theo profession_code + level + location_id
+// ⭐ Load lớp
 function loadClasses() {
     const professionCode = $('#profession_code').val();
     const level = $('#level').val();
@@ -504,12 +466,7 @@ function loadClasses() {
         return;
     }
     
-    console.log('🏫 Loading classes:', {
-        profession_code: professionCode,
-        level: level,
-        location_id: locationId,
-        faculty_id: <?php echo $_SESSION['faculty_id']; ?>
-    });
+    console.log('🏫 Loading classes:', {professionCode, level, locationId});
     
     $.ajax({
         url: 'ajax/get_classes_by_criteria.php',
@@ -524,52 +481,39 @@ function loadClasses() {
         success: function(response) {
             console.log('✅ Classes response:', response);
             
-            if (response.success) {
-                const classSelect = $('#class_id');
-                classSelect.prop('disabled', false)
-                          .empty()
-                          .append('<option value="">-- Chọn lớp --</option>');
-                
-                if (response.classes.length > 0) {
-                    response.classes.forEach(function(cls) {
-                        classSelect.append(
-                            `<option value="${cls.id}">${cls.class_code} - ${cls.class_name}</option>`
-                        );
-                    });
-                } else {
-                    classSelect.append('<option value="">-- Không có lớp --</option>');
-                    alert('⚠️ Không tìm thấy lớp học!');
-                }
+            const classSelect = $('#class_id');
+            classSelect.prop('disabled', false)
+                      .empty()
+                      .append('<option value="">-- Chọn lớp --</option>');
+            
+            if (response.success && response.classes.length > 0) {
+                response.classes.forEach(function(cls) {
+                    classSelect.append(
+                        `<option value="${cls.id}">${cls.class_code} - ${cls.class_name}</option>`
+                    );
+                });
             } else {
-                alert('❌ ' + (response.message || 'Lỗi khi tải lớp học'));
+                classSelect.append('<option value="">-- Không có lớp --</option>');
             }
         },
         error: function(xhr, status, error) {
-            console.error('❌ AJAX Error:', {
-                status: status,
-                error: error,
-                response: xhr.responseText
-            });
-            alert('Lỗi khi tải lớp học. Kiểm tra Console (F12) để xem chi tiết.');
+            console.error('❌ Classes error:', {status, error});
+            $('#class_id').prop('disabled', false)
+                        .empty()
+                        .append('<option value="">-- Lỗi --</option>');
         }
     });
 }
 
-// ⭐ Load giá giờ theo location + education_level
+// ⭐ Load giá giờ
 function loadHourlyRate() {
     const lecturerId = $('#lecturer_id').val();
     const locationId = $('#location_id').val();
     const educationLevel = $('#lecturer_id').find(':selected').data('education');
     
-    if (!lecturerId || !locationId || !educationLevel) {
-        return;
-    }
+    if (!lecturerId || !locationId || !educationLevel) return;
     
-    console.log('💰 Loading hourly rate:', {
-        location_id: locationId,
-        education_level: educationLevel,
-        academic_year: $('#academic_year').val()
-    });
+    console.log('💰 Loading rate:', {locationId, educationLevel});
     
     $.ajax({
         url: 'ajax/get_hourly_rate_by_location.php',
@@ -581,22 +525,12 @@ function loadHourlyRate() {
         },
         dataType: 'json',
         success: function(response) {
-            console.log('✅ Hourly rate response:', response);
-            
             if (response.success) {
                 $('#hourly_rate').val(formatCurrency(response.rate));
                 calculateTotal();
             } else {
                 alert('❌ ' + (response.message || 'Không tìm thấy mức giá'));
             }
-        },
-        error: function(xhr, status, error) {
-            console.error('❌ AJAX Error:', {
-                status: status,
-                error: error,
-                response: xhr.responseText
-            });
-            alert('Lỗi khi tải giá giờ. Kiểm tra Console (F12) để xem chi tiết.');
         }
     });
 }
