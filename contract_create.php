@@ -10,17 +10,17 @@ $database = new Database();
 $conn = $database->getConnection();
 $page_title = "Tạo hợp đồng mới";
 
-// Lấy danh sách giảng viên thuộc khoa của giáo vụ
+// Lấy danh sách giảng viên
 $query = "SELECT * FROM lecturers WHERE faculty_id = :faculty_id AND is_active = 1 ORDER BY full_name";
 $stmt = $conn->prepare($query);
 $stmt->bindParam(':faculty_id', $_SESSION['faculty_id']);
 $stmt->execute();
 $lecturers = $stmt->fetchAll();
 
-// Lấy danh sách nghề thuộc khoa (KHÔNG lọc theo level ở đây)
-$query = "SELECT DISTINCT profession_code, profession_name, id FROM professions 
+// ⭐ Lấy danh sách nghề DISTINCT (chỉ lấy profession_code, không quan tâm level)
+$query = "SELECT DISTINCT profession_code, profession_name 
+          FROM professions 
           WHERE faculty_id = :faculty_id AND is_active = 1 
-          GROUP BY profession_code, profession_name
           ORDER BY profession_name";
 $stmt = $conn->prepare($query);
 $stmt->bindParam(':faculty_id', $_SESSION['faculty_id']);
@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $total_amount = $total_hours * $hourly_rate;
         
-        // Tạo số hợp đồng tự động
+        // Tạo số hợp đồng
         $contract_number = 'HD-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
         
         $query = "INSERT INTO contracts 
@@ -138,6 +138,7 @@ include 'includes/header.php';
                         </select>
                     </div>
                     
+                    <!-- ⭐ Chọn MÃ NGHỀ (profession_code) -->
                     <div class="mb-3">
                         <label for="profession_code" class="form-label">
                             Nghề <span class="text-danger">*</span>
@@ -152,6 +153,7 @@ include 'includes/header.php';
                         </select>
                     </div>
                     
+                    <!-- ⭐ Chọn TRÌNH ĐỘ -->
                     <div class="mb-3">
                         <label for="level" class="form-label">
                             Trình độ <span class="text-danger">*</span>
@@ -164,6 +166,7 @@ include 'includes/header.php';
                         </select>
                     </div>
                     
+                    <!-- Hidden field để lưu profession_id -->
                     <input type="hidden" id="profession_id" name="profession_id">
                     
                     <hr>
@@ -334,24 +337,46 @@ include 'includes/header.php';
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
+console.log('🚀 Script loaded');
+
 $(document).ready(function() {
-    // Khi chọn nghề và trình độ → Load môn học và profession_id
+    console.log('✅ Document ready');
+    
+    // Debug: Kiểm tra các element tồn tại
+    console.log('Elements check:', {
+        profession_code: $('#profession_code').length,
+        level: $('#level').length,
+        subject_id: $('#subject_id').length,
+        location_id: $('#location_id').length
+    });
+    
+    // ⭐ Khi chọn nghề HOẶC trình độ → Load môn học
     $('#profession_code, #level').on('change', function() {
+        console.log('🔄 Change event triggered:', {
+            element: this.id,
+            profession_code: $('#profession_code').val(),
+            level: $('#level').val()
+        });
         loadSubjects();
+        loadClasses(); // Load lớp nếu đã chọn đủ
     });
     
-    // Khi chọn nghề, trình độ và cơ sở → Load lớp
-    $('#profession_code, #level, #location_id').on('change', function() {
+    // ⭐ Khi chọn cơ sở → Load lớp và giá giờ
+    $('#location_id').on('change', function() {
+        console.log('🔄 Location changed:', $('#location_id').val());
         loadClasses();
+        loadHourlyRate();
     });
     
-    // Khi chọn giảng viên và cơ sở → Load giá giờ
-    $('#lecturer_id, #location_id').on('change', function() {
+    // Khi chọn giảng viên → Load giá giờ
+    $('#lecturer_id').on('change', function() {
+        console.log('🔄 Lecturer changed:', $('#lecturer_id').val());
         loadHourlyRate();
     });
     
     // Khi chọn môn học → Load số giờ
     $('#subject_id').on('change', function() {
+        console.log('🔄 Subject changed:', $('#subject_id').val());
         loadSubjectHours();
     });
     
@@ -359,8 +384,11 @@ $(document).ready(function() {
     $('#total_hours, #hourly_rate').on('input change', function() {
         calculateTotal();
     });
+    
+    console.log('✅ All event listeners attached');
 });
 
+// ⭐ Load môn học theo profession_code + level + faculty_id
 function loadSubjects() {
     const professionCode = $('#profession_code').val();
     const level = $('#level').val();
@@ -372,6 +400,15 @@ function loadSubjects() {
         return;
     }
     
+    console.log('📚 Loading subjects:', {
+        profession_code: professionCode,
+        level: level,
+        faculty_id: <?php echo $_SESSION['faculty_id']; ?>
+    });
+    
+    // Hiển thị loading
+    $('#subject_id').empty().append('<option value="">⏳ Đang tải...</option>');
+    
     $.ajax({
         url: 'ajax/get_subjects_by_profession_level.php',
         type: 'POST',
@@ -381,34 +418,80 @@ function loadSubjects() {
             faculty_id: <?php echo $_SESSION['faculty_id']; ?>
         },
         dataType: 'json',
+        timeout: 10000, // 10 giây
         success: function(response) {
-            if (response.success) {
-                // Lưu profession_id
+            console.log('✅ Subjects response:', response);
+            
+            if (response && response.success) {
+                // ⭐ Lưu profession_id vào hidden field
                 $('#profession_id').val(response.profession_id);
                 
                 // Load subjects
                 const subjectSelect = $('#subject_id');
-                subjectSelect.prop('disabled', false)
+                subjectSelect.prop('disabled', false) // ✅ XÓA DISABLED
                            .empty()
                            .append('<option value="">-- Chọn môn học --</option>');
                 
-                response.subjects.forEach(function(subject) {
-                    subjectSelect.append(
-                        `<option value="${subject.id}" data-hours="${subject.credit_hours}">
-                            ${subject.subject_code} - ${subject.subject_name} (${subject.credit_hours} giờ)
-                        </option>`
-                    );
-                });
+                if (response.subjects && response.subjects.length > 0) {
+                    response.subjects.forEach(function(subject) {
+                        subjectSelect.append(
+                            `<option value="${subject.id}" data-hours="${subject.credit_hours || 0}">
+                                ${subject.subject_code} - ${subject.subject_name} (${subject.credit_hours || 0} giờ)
+                            </option>`
+                        );
+                    });
+                } else {
+                    subjectSelect.prop('disabled', false) // ✅ VẪN CHO CHỌN
+                             .append('<option value="">-- Không có môn học --</option>');
+                    alert('⚠️ Không tìm thấy môn học!\n\nNghề: ' + professionCode + '\nTrình độ: ' + level + 
+                          '\n\n💡 Vui lòng thêm môn học trong "Quản lý môn học"');
+                }
             } else {
-                alert(response.message || 'Không tìm thấy môn học');
+                console.error('❌ Invalid response:', response);
+                alert('❌ Lỗi: ' + (response?.message || 'Response không hợp lệ'));
+                $('#subject_id').prop('disabled', true)
+                               .empty()
+                               .append('<option value="">-- Lỗi --</option>');
             }
         },
-        error: function() {
-            alert('Lỗi khi tải môn học');
+        error: function(xhr, status, error) {
+            console.error('❌ AJAX Error:', {
+                status: status,
+                error: error,
+                statusText: xhr.statusText,
+                responseText: xhr.responseText,
+                readyState: xhr.readyState
+            });
+            
+            let errorMsg = 'Lỗi khi tải môn học!\n\n';
+            
+            if (xhr.status === 404) {
+                errorMsg += '❌ File không tồn tại: ajax/get_subjects_by_profession_level.php';
+            } else if (xhr.status === 500) {
+                errorMsg += '❌ Lỗi server (500). Kiểm tra:\n';
+                errorMsg += '1. File PHP có lỗi syntax\n';
+                errorMsg += '2. Database connection\n';
+                errorMsg += '3. Console (F12) để xem chi tiết';
+            } else if (status === 'timeout') {
+                errorMsg += '❌ Timeout (quá 10s). Kiểm tra:\n';
+                errorMsg += '1. Database quá chậm\n';
+                errorMsg += '2. Query phức tạp';
+            } else {
+                errorMsg += 'Status: ' + status + '\n';
+                errorMsg += 'Error: ' + error + '\n';
+                errorMsg += '\n💡 Mở Console (F12) > Network tab để xem chi tiết';
+            }
+            
+            alert(errorMsg);
+            
+            $('#subject_id').prop('disabled', true)
+                           .empty()
+                           .append('<option value="">-- Lỗi --</option>');
         }
     });
 }
 
+// ⭐ Load lớp theo profession_code + level + location_id
 function loadClasses() {
     const professionCode = $('#profession_code').val();
     const level = $('#level').val();
@@ -421,6 +504,13 @@ function loadClasses() {
         return;
     }
     
+    console.log('🏫 Loading classes:', {
+        profession_code: professionCode,
+        level: level,
+        location_id: locationId,
+        faculty_id: <?php echo $_SESSION['faculty_id']; ?>
+    });
+    
     $.ajax({
         url: 'ajax/get_classes_by_criteria.php',
         type: 'POST',
@@ -432,27 +522,40 @@ function loadClasses() {
         },
         dataType: 'json',
         success: function(response) {
+            console.log('✅ Classes response:', response);
+            
             if (response.success) {
                 const classSelect = $('#class_id');
                 classSelect.prop('disabled', false)
                           .empty()
                           .append('<option value="">-- Chọn lớp --</option>');
                 
-                response.classes.forEach(function(cls) {
-                    classSelect.append(
-                        `<option value="${cls.id}">${cls.class_code} - ${cls.class_name}</option>`
-                    );
-                });
+                if (response.classes.length > 0) {
+                    response.classes.forEach(function(cls) {
+                        classSelect.append(
+                            `<option value="${cls.id}">${cls.class_code} - ${cls.class_name}</option>`
+                        );
+                    });
+                } else {
+                    classSelect.append('<option value="">-- Không có lớp --</option>');
+                    alert('⚠️ Không tìm thấy lớp học!');
+                }
             } else {
-                alert(response.message || 'Không tìm thấy lớp học');
+                alert('❌ ' + (response.message || 'Lỗi khi tải lớp học'));
             }
         },
-        error: function() {
-            alert('Lỗi khi tải lớp học');
+        error: function(xhr, status, error) {
+            console.error('❌ AJAX Error:', {
+                status: status,
+                error: error,
+                response: xhr.responseText
+            });
+            alert('Lỗi khi tải lớp học. Kiểm tra Console (F12) để xem chi tiết.');
         }
     });
 }
 
+// ⭐ Load giá giờ theo location + education_level
 function loadHourlyRate() {
     const lecturerId = $('#lecturer_id').val();
     const locationId = $('#location_id').val();
@@ -461,6 +564,12 @@ function loadHourlyRate() {
     if (!lecturerId || !locationId || !educationLevel) {
         return;
     }
+    
+    console.log('💰 Loading hourly rate:', {
+        location_id: locationId,
+        education_level: educationLevel,
+        academic_year: $('#academic_year').val()
+    });
     
     $.ajax({
         url: 'ajax/get_hourly_rate_by_location.php',
@@ -472,15 +581,22 @@ function loadHourlyRate() {
         },
         dataType: 'json',
         success: function(response) {
+            console.log('✅ Hourly rate response:', response);
+            
             if (response.success) {
                 $('#hourly_rate').val(formatCurrency(response.rate));
                 calculateTotal();
             } else {
-                alert(response.message || 'Không tìm thấy mức giá');
+                alert('❌ ' + (response.message || 'Không tìm thấy mức giá'));
             }
         },
-        error: function() {
-            alert('Lỗi khi tải giá giờ');
+        error: function(xhr, status, error) {
+            console.error('❌ AJAX Error:', {
+                status: status,
+                error: error,
+                response: xhr.responseText
+            });
+            alert('Lỗi khi tải giá giờ. Kiểm tra Console (F12) để xem chi tiết.');
         }
     });
 }
@@ -517,13 +633,6 @@ function calculateTotal() {
 function formatCurrency(value) {
     return new Intl.NumberFormat('vi-VN').format(value);
 }
-
-// DEBUG: Kiểm tra khi chọn nghề và trình độ
-$('#profession_code, #level').on('change', function() {
-    console.log('Profession Code:', $('#profession_code').val());
-    console.log('Level:', $('#level').val());
-    console.log('Faculty ID:', <?php echo $_SESSION['faculty_id']; ?>);
-});
 </script>
 
 <?php include 'includes/footer.php'; ?>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test AJAX - UTF-8</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { padding: 10px 20px; font-size: 16px; margin: 10px; }
+        pre { background: #f4f4f4; padding: 15px; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Test AJAX - Kiểm tra UTF-8 Encoding</h1>
+    
+    <button onclick="testTrungCap()">Test Trung cấp</button>
+    <button onclick="testCaoDang()">Test Cao đẳng</button>
+    <button onclick="testCaoDangLienThong()">Test Cao đẳng liên thông</button>
+    
+    <h3>Kết quả:</h3>
+    <pre id="result"></pre>
+    
+    <script>
+    function testAjax(level) {
+        console.log('🧪 Testing với level:', level);
+        
+        $.ajax({
+            url: 'ajax/get_subjects_by_profession_level.php',
+            type: 'POST',
+            data: { 
+                profession_code: 'CNTT01',
+                level: level,
+                faculty_id: 1
+            },
+            dataType: 'json',
+            success: function(response) {
+                console.log('✅ Success:', response);
+                const className = response.success ? 'success' : 'error';
+                $('#result').html(`<span class="${className}">${JSON.stringify(response, null, 2)}</span>`);
+            },
+            error: function(xhr, status, error) {
+                console.error('❌ Error:', {status, error});
+                $('#result').html(`<span class="error">ERROR: ${status}\n${xhr.responseText}</span>`);
+            }
+        });
+    }
+    
+    function testTrungCap() { testAjax('Trung cấp'); }
+    function testCaoDang() { testAjax('Cao đẳng'); }
+    function testCaoDangLienThong() { testAjax('Cao đẳng liên thông'); }
+    </script>
+</body>
+</html>
