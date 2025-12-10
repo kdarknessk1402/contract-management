@@ -342,56 +342,61 @@ console.log('🚀 Script loaded');
 $(document).ready(function() {
     console.log('✅ Document ready');
     
-    // ⭐ Khi chọn nghề HOẶC trình độ → Load môn học
+    // ⭐ KHI CHỌN NGHỀ HOẶC TRÌNH ĐỘ → Load môn học
     $('#profession_code, #level').on('change', function() {
-        console.log('🔄 Profession or Level changed');
+        console.log('🔄 Profession/Level changed');
         loadSubjects();
-        loadClasses();
+        loadClasses(); // Cũng reset lớp học
     });
     
-    // ⭐ Khi chọn cơ sở → Load lớp và giá giờ
+    // ⭐ KHI CHỌN CƠ SỞ → Load lớp và giá giờ
     $('#location_id').on('change', function() {
         console.log('🔄 Location changed');
         loadClasses();
         loadHourlyRate();
     });
     
-    // Khi chọn giảng viên → Load giá giờ
+    // KHI CHỌN GIẢNG VIÊN → Load giá giờ
     $('#lecturer_id').on('change', function() {
         console.log('🔄 Lecturer changed');
         loadHourlyRate();
     });
     
-    // Khi chọn môn học → Load số giờ
+    // KHI CHỌN MÔN HỌC → Load số giờ
     $('#subject_id').on('change', function() {
         console.log('🔄 Subject changed');
         loadSubjectHours();
     });
     
-    // Tính tổng tiền
+    // KHI THAY ĐỔI GIỜ/GIÁ → Tính tổng
     $('#total_hours, #hourly_rate').on('input change', function() {
         calculateTotal();
     });
 });
 
-// ⭐ Load môn học theo profession_code + level + faculty_id
+// ⭐⭐⭐ HÀM LOAD MÔN HỌC - QUAN TRỌNG NHẤT ⭐⭐⭐
 function loadSubjects() {
     const professionCode = $('#profession_code').val();
     const level = $('#level').val();
     
-    console.log('📚 loadSubjects called:', {professionCode, level});
+    console.log('📚 loadSubjects:', {professionCode, level});
     
+    // Kiểm tra đầu vào
     if (!professionCode || !level) {
+        console.log('⚠️ Missing profession_code or level');
         $('#subject_id').prop('disabled', true)
                        .empty()
                        .append('<option value="">-- Chọn nghề và trình độ trước --</option>');
+        $('#profession_id').val(''); // Clear hidden field
         return;
     }
     
-    // ⭐ XÓA DISABLED NGAY
+    // ⭐ LUÔN ENABLE để user biết đang load
     $('#subject_id').prop('disabled', false)
                     .empty()
-                    .append('<option value="">⏳ Đang tải...</option>');
+                    .append('<option value="">⏳ Đang tải môn học...</option>');
+    
+    console.log('🌐 Starting AJAX request...');
     
     $.ajax({
         url: 'ajax/get_subjects_by_profession_level.php',
@@ -402,22 +407,28 @@ function loadSubjects() {
             faculty_id: <?php echo $_SESSION['faculty_id']; ?>
         },
         dataType: 'json',
-        timeout: 10000,
+        timeout: 10000, // 10 giây timeout
+        beforeSend: function() {
+            console.log('📤 Sending request...');
+        },
         success: function(response) {
-            console.log('✅ Subjects response:', response);
+            console.log('✅ AJAX Success:', response);
             
             const subjectSelect = $('#subject_id');
             
             if (response && response.success) {
-                // ⭐ Lưu profession_id
+                // ⭐ Lưu profession_id vào hidden field
                 $('#profession_id').val(response.profession_id);
+                console.log('💾 Saved profession_id:', response.profession_id);
                 
-                // ⭐ LUÔN ENABLE (quan trọng!)
+                // ⭐ LUÔN ENABLE
                 subjectSelect.prop('disabled', false)
                            .empty()
                            .append('<option value="">-- Chọn môn học --</option>');
                 
                 if (response.subjects && response.subjects.length > 0) {
+                    console.log(`📚 Loading ${response.subjects.length} subjects`);
+                    
                     response.subjects.forEach(function(subject) {
                         subjectSelect.append(
                             `<option value="${subject.id}" data-hours="${subject.credit_hours || 0}">
@@ -425,35 +436,63 @@ function loadSubjects() {
                             </option>`
                         );
                     });
+                    
+                    console.log('✅ Subjects loaded successfully');
                 } else {
+                    console.warn('⚠️ No subjects found');
                     subjectSelect.append('<option value="">-- Không có môn học --</option>');
-                    alert('⚠️ Không tìm thấy môn học!\n\nNghề: ' + professionCode + '\nTrình độ: ' + level);
+                    alert('⚠️ Không tìm thấy môn học!\n\nNghề: ' + professionCode + '\nTrình độ: ' + level + '\n\nVui lòng kiểm tra dữ liệu trong database.');
                 }
             } else {
                 console.error('❌ Response failed:', response);
                 
-                // ⭐ VẪN CHO CHỌN dù có lỗi
                 subjectSelect.prop('disabled', false)
                            .empty()
                            .append('<option value="">-- Lỗi: ' + (response?.message || 'Không rõ') + ' --</option>');
                 
-                alert('❌ ' + (response?.message || 'Lỗi không xác định'));
+                // Hiển thị chi tiết lỗi
+                let errorMsg = '❌ Không thể tải môn học!\n\n';
+                errorMsg += 'Nghề: ' + professionCode + '\n';
+                errorMsg += 'Trình độ: ' + level + '\n';
+                if (response?.message) {
+                    errorMsg += 'Lỗi: ' + response.message;
+                }
+                if (response?.available_professions) {
+                    errorMsg += '\n\nCác nghề có sẵn:\n';
+                    response.available_professions.forEach(function(p) {
+                        errorMsg += '- ' + p.profession_code + ' (' + p.level + ')\n';
+                    });
+                }
+                alert(errorMsg);
             }
         },
         error: function(xhr, status, error) {
-            console.error('❌ AJAX Error:', {status, error, response: xhr.responseText});
+            console.error('❌ AJAX Error:', {
+                status: status,
+                error: error,
+                responseText: xhr.responseText,
+                statusCode: xhr.status
+            });
             
-            // ⭐ ENABLE để user biết có lỗi
             $('#subject_id').prop('disabled', false)
                           .empty()
                           .append('<option value="">-- Lỗi kết nối --</option>');
             
-            alert('❌ Lỗi khi tải môn học!\n\nKiểm tra Console (F12) để xem chi tiết.');
+            let errorMsg = '❌ Lỗi khi tải môn học!\n\n';
+            errorMsg += 'Status: ' + status + '\n';
+            errorMsg += 'Error: ' + error + '\n';
+            errorMsg += 'HTTP Code: ' + xhr.status + '\n\n';
+            errorMsg += 'Kiểm tra:\n';
+            errorMsg += '1. File ajax/get_subjects_by_profession_level.php có tồn tại?\n';
+            errorMsg += '2. Database có dữ liệu môn học?\n';
+            errorMsg += '3. Mở Console (F12) để xem chi tiết';
+            
+            alert(errorMsg);
         }
     });
 }
 
-// ⭐ Load lớp
+// ⭐ HÀM LOAD LỚP HỌC
 function loadClasses() {
     const professionCode = $('#profession_code').val();
     const level = $('#level').val();
@@ -486,7 +525,7 @@ function loadClasses() {
                       .empty()
                       .append('<option value="">-- Chọn lớp --</option>');
             
-            if (response.success && response.classes.length > 0) {
+            if (response.success && response.classes && response.classes.length > 0) {
                 response.classes.forEach(function(cls) {
                     classSelect.append(
                         `<option value="${cls.id}">${cls.class_code} - ${cls.class_name}</option>`
@@ -505,13 +544,16 @@ function loadClasses() {
     });
 }
 
-// ⭐ Load giá giờ
+// ⭐ HÀM LOAD GIÁ GIỜ
 function loadHourlyRate() {
     const lecturerId = $('#lecturer_id').val();
     const locationId = $('#location_id').val();
     const educationLevel = $('#lecturer_id').find(':selected').data('education');
     
-    if (!lecturerId || !locationId || !educationLevel) return;
+    if (!lecturerId || !locationId || !educationLevel) {
+        console.log('⚠️ Missing data for hourly rate');
+        return;
+    }
     
     console.log('💰 Loading rate:', {locationId, educationLevel});
     
@@ -531,6 +573,9 @@ function loadHourlyRate() {
             } else {
                 alert('❌ ' + (response.message || 'Không tìm thấy mức giá'));
             }
+        },
+        error: function() {
+            alert('❌ Lỗi khi tải giá giờ');
         }
     });
 }

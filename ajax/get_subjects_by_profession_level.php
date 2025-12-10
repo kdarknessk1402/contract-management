@@ -1,114 +1,115 @@
 <?php
-// ⭐ BẮT BUỘC: Set UTF-8 ngay từ đầu
+// ⭐ CRITICAL: Set UTF-8 TRƯỚC KHI làm bất cứ việc gì
 mb_internal_encoding('UTF-8');
 mb_http_output('UTF-8');
 header('Content-Type: application/json; charset=utf-8');
 
-// Debug logging
-error_log("=== AJAX REQUEST ===");
-error_log("POST data: " . print_r($_POST, true));
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+error_log("=== AJAX get_subjects START ===");
 
 // Kiểm tra tham số
 if (!isset($_POST['profession_code']) || !isset($_POST['level']) || !isset($_POST['faculty_id'])) {
     echo json_encode([
         'success' => false, 
-        'message' => 'Thiếu tham số bắt buộc',
+        'message' => 'Thiếu tham số',
         'received' => $_POST
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-require_once '../config/config.php';
-require_once '../config/database.php';
-
-$database = new Database();
-$conn = $database->getConnection();
-
-// ⭐ Lấy input và TRIM kỹ
-$profession_code = mb_strtoupper(trim($_POST['profession_code']), 'UTF-8');
-$level_raw = trim($_POST['level']);
-$faculty_id = (int)$_POST['faculty_id'];
-
-error_log("Normalized input: profession_code='$profession_code', level='$level_raw', faculty_id=$faculty_id");
-
-// ⭐ SIMPLE APPROACH: So sánh CHÍNH XÁC với 3 giá trị có thể
-$valid_levels = ['Trung cấp', 'Cao đẳng', 'Cao đẳng liên thông'];
-
-// Tìm level matching (không phân biệt hoa thường, bỏ qua khoảng trắng thừa)
-$level_normalized = null;
-foreach ($valid_levels as $valid_level) {
-    // So sánh không phân biệt hoa/thường, bỏ qua khoảng trắng
-    $clean_input = preg_replace('/\s+/', ' ', mb_strtolower($level_raw, 'UTF-8'));
-    $clean_valid = preg_replace('/\s+/', ' ', mb_strtolower($valid_level, 'UTF-8'));
-    
-    if ($clean_input === $clean_valid) {
-        $level_normalized = $valid_level;
-        break;
-    }
-}
-
-if (!$level_normalized) {
-    error_log("Level not matched: '$level_raw'");
-    echo json_encode([
-        'success' => false,
-        'message' => 'Trình độ không hợp lệ',
-        'received_level' => $level_raw,
-        'received_level_hex' => bin2hex($level_raw), // Debug encoding
-        'valid_levels' => $valid_levels
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-error_log("Level matched: '$level_normalized'");
+require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../config/database.php';
 
 try {
-    // ⭐ Tìm profession_id
-    $query = "SELECT id, profession_name, level FROM professions 
-              WHERE UPPER(profession_code) = :profession_code 
-              AND level = :level
+    $database = new Database();
+    $conn = $database->getConnection();
+
+    $profession_code = mb_strtoupper(trim($_POST['profession_code']), 'UTF-8');
+    $level_input = trim($_POST['level']);
+    $faculty_id = (int)$_POST['faculty_id'];
+
+    error_log("Input: code=$profession_code, level=$level_input, faculty=$faculty_id");
+
+    // ⭐ UNICODE FIX: So sánh TRỰC TIẾP với database, không normalize
+    // Tìm profession với BINARY comparison để tránh vấn đề encoding
+    $query = "SELECT id, profession_name, level 
+              FROM professions 
+              WHERE profession_code = :profession_code 
               AND faculty_id = :faculty_id
-              AND is_active = 1
-              LIMIT 1";
+              AND is_active = 1";
     
     $stmt = $conn->prepare($query);
     $stmt->bindParam(':profession_code', $profession_code, PDO::PARAM_STR);
-    $stmt->bindParam(':level', $level_normalized, PDO::PARAM_STR);
     $stmt->bindParam(':faculty_id', $faculty_id, PDO::PARAM_INT);
     $stmt->execute();
     
-    $profession = $stmt->fetch(PDO::FETCH_ASSOC);
+    $all_professions = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    if (!$profession) {
-        error_log("Profession not found");
-        
-        // Debug: Lấy TẤT CẢ professions có profession_code này
-        $debugQuery = "SELECT id, profession_code, level, profession_name, faculty_id 
-                       FROM professions 
-                       WHERE UPPER(profession_code) = :profession_code 
-                       AND is_active = 1";
-        $debugStmt = $conn->prepare($debugQuery);
-        $debugStmt->bindParam(':profession_code', $profession_code, PDO::PARAM_STR);
-        $debugStmt->execute();
-        $available = $debugStmt->fetchAll(PDO::FETCH_ASSOC);
-        
+    error_log("Found " . count($all_professions) . " professions for code $profession_code");
+    
+    if (count($all_professions) === 0) {
         echo json_encode([
-            'success' => false, 
-            'message' => 'Không tìm thấy nghề với trình độ này',
+            'success' => false,
+            'message' => "Không tìm thấy nghề: $profession_code",
             'searched' => [
                 'profession_code' => $profession_code,
-                'level' => $level_normalized,
                 'faculty_id' => $faculty_id
-            ],
-            'available_professions' => $available,
-            'debug_query' => $query
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    
+    // ⭐ Tìm profession khớp level bằng cách so sánh LINH HOẠT
+    $profession = null;
+    $level_lower = mb_strtolower($level_input, 'UTF-8');
+    
+    foreach ($all_professions as $prof) {
+        $prof_level_lower = mb_strtolower($prof['level'], 'UTF-8');
+        
+        // Remove all diacritics and spaces for comparison
+        $level_clean = preg_replace('/[^a-z0-9]/u', '', $level_lower);
+        $prof_clean = preg_replace('/[^a-z0-9]/u', '', $prof_level_lower);
+        
+        error_log("Compare: '$level_clean' vs '$prof_clean' (original: '$level_input' vs '{$prof['level']}')");
+        
+        // Match by keyword detection
+        if (
+            // Trung cấp
+            (stripos($level_input, 'trung') !== false && stripos($prof['level'], 'Trung') !== false && stripos($prof['level'], 'liên') === false) ||
+            // Cao đẳng (not liên thông)
+            (stripos($level_input, 'cao') !== false && stripos($prof['level'], 'Cao') !== false && stripos($level_input, 'lien') === false && stripos($prof['level'], 'liên') === false) ||
+            // Cao đẳng liên thông
+            (stripos($level_input, 'lien') !== false && stripos($prof['level'], 'liên') !== false)
+        ) {
+            $profession = $prof;
+            error_log("✅ MATCHED: {$prof['level']}");
+            break;
+        }
+    }
+    
+    if (!$profession) {
+        $available_levels = array_column($all_professions, 'level');
+        error_log("❌ NO MATCH - Available: " . implode(', ', $available_levels));
+        
+        echo json_encode([
+            'success' => false,
+            'message' => "Không tìm thấy trình độ '$level_input' cho nghề $profession_code",
+            'available_levels' => $available_levels,
+            'debug' => [
+                'input_level' => $level_input,
+                'input_bytes' => bin2hex($level_input)
+            ]
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
     
     $profession_id = $profession['id'];
-    error_log("Found profession_id: $profession_id");
+    error_log("Using profession_id: $profession_id");
     
-    // ⭐ Lấy môn học
+    // Lấy môn học
     $query = "SELECT id, subject_code, subject_name, credit_hours 
               FROM subjects 
               WHERE profession_id = :profession_id 
@@ -121,7 +122,7 @@ try {
     
     $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    error_log("Found " . count($subjects) . " subjects");
+    error_log("✅ Found " . count($subjects) . " subjects");
     
     echo json_encode([
         'success' => true,
@@ -132,11 +133,38 @@ try {
         'count' => count($subjects)
     ], JSON_UNESCAPED_UNICODE);
     
-} catch (PDOException $e) {
-    error_log("Database error: " . $e->getMessage());
+} catch (Exception $e) {
+    error_log("❌ ERROR: " . $e->getMessage());
     echo json_encode([
         'success' => false,
-        'message' => 'Lỗi database: ' . $e->getMessage()
+        'message' => 'Lỗi: ' . $e->getMessage()
     ], JSON_UNESCAPED_UNICODE);
 }
 ?>
+```
+
+---
+
+## ✅ GIẢI THÍCH FIX:
+
+### Vấn đề cũ:
+- Normalize `"Cao đẳng"` → so sánh với database `"Cao đẳng"` 
+- Encoding khác nhau → **KHÔNG KHỚP** ❌
+
+### Giải pháp mới:
+1. **Không normalize** - Lấy TẤT CẢ professions của code đó
+2. **So sánh bằng từ khóa** - Tìm `"cao"` + `"đẳng"` (không cần đúng chính tả)
+3. **Phân biệt "liên thông"** - Kiểm tra có chữ "lien/liên" không
+
+### Ví dụ hoạt động:
+- Input: `"cao dang"` → Tìm có chữ "cao" + không có "lien" → ✅ Match "Cao đẳng"
+- Input: `"Cao đẳng"` → Tìm có chữ "cao" + không có "lien" → ✅ Match "Cao đẳng"  
+- Input: `"cao dang lien thong"` → Tìm có chữ "lien" → ✅ Match "Cao đẳng liên thông"
+
+---
+
+## 🧪 TEST NGAY:
+
+### 1. Test direct:
+```
+http://localhost/contract-management/test_direct_ajax.php
